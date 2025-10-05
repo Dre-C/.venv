@@ -294,16 +294,15 @@ class WagerAuditProgram:
         #Handles converting percentages first
         if is_percent_column:
             try:
-                val_str = str(val).strip()
                 if '%' in val_str:
                     numeric_val = float(val_str.replace('%', '').replace(',', '').strip())
                 else:
                     numeric_val = float(val_str.replace(',', '').strip())
-                    if numeric_val > 1:
-                        numeric_val /= 100
-                    return float(numeric_val)
+                if numeric_val > 1:
+                    numeric_val /= 100
+                return numeric_val
             except (ValueError, TypeError):
-                return np.nan
+                raise ValueError(f"Invalid percent value: {val_str}")
 
         #Handles multiple values separated by commas or space separated values (ex: $0.01, $0.05, $0.10, etc.)
         if any(sym in val_str for sym in ('$', '€', '£')): #Can add more currencies as needed
@@ -358,13 +357,6 @@ class WagerAuditProgram:
                 return str(num).rstrip("0").rstrip(".") #If not an integer, return as string formatted with two decimal places
         except (ValueError, TypeError):
             return '' #if conversion fails, return empty string
-        
-    def safe_percent_display(self, x):
-        try:
-            num = float(x)
-            return f"{int(round(num*100))}%"
-        except (ValueError, TypeError):
-            return 'N/A'
 
     def detect_header_row(self, file_path, header_indicator="Game"):
     #Handles automatically detecting header rows by scanning all rows
@@ -523,29 +515,12 @@ class WagerAuditProgram:
                 #Handle RTP% column for operatorSheet_file specifically
                 percent_column = ['RTP%']
 
-                #Skip Game column and normalize values in the other columns and fill NaN values with 'N/A'
-                for f in [wagerAudit_StagingFile, wagerAudit_ProductionFile]:
-                    for wager_column in f.columns:
-                        if wager_column != 'Game':
-                            f[wager_column] = f[wager_column].apply(lambda x: self.normalize_value(x, is_percent_column=(wager_column in percent_column)))
-
-                for wager_column in operatorSheet_file.columns:
-                    if wager_column != 'Game':
-                        operatorSheet_file[wager_column] = operatorSheet_file[wager_column].apply(lambda x: self.normalize_value(x, is_percent_column=(wager_column in percent_column)))
-
-                for f in [wagerAudit_StagingFile, wagerAudit_ProductionFile]:
-                    for wager_column in percent_column:
-                        if wager_column in f.columns:
-                            f[wager_column] = f[wager_column].apply(self.safe_percent_display)
-
-                for wager_column in percent_column:
-                    if wager_column in operatorSheet_file.columns:
-                        operatorSheet_file[wager_column] = operatorSheet_file[wager_column].apply(self.safe_percent_display)
-
+                #Skip Game column and normalize values in the other columns
                 for f in [wagerAudit_StagingFile, wagerAudit_ProductionFile, operatorSheet_file]:
                     for wager_column in f.columns:
-                        if col != 'Game' and col not in percent_column:
-                            f[wager_column] = f[wager_column].replace('', 'N/A')
+                        if wager_column != 'Game':
+                            continue
+                        f[wager_column] = f[wager_column].apply(lambda x: self.normalize_value(x, is_percent_column=(wager_column in percent_column)))
 
                 #Sorts Game columns alphabetically in all DataFrames
                 wagerAudit_StagingFile = wagerAudit_StagingFile.sort_values(by='Game', ascending=True)
@@ -628,6 +603,11 @@ class WagerAuditProgram:
                 audit_results_wagers = audit_results_wagers[cols]
 
                 audit_results_wagers = audit_results_wagers.sort_values(by='Game', ascending=True).reset_index(drop=True)
+
+                for f in [wagerAudit_StagingFile, wagerAudit_ProductionFile, operatorSheet_file, audit_results_wagers]:
+                    for wager_column in percent_column:
+                        if wager_column in f.columns:
+                            f[wager_column] = f[wager_column].apply(lambda x: f"{int(round(x * 100))}%" if isinstance(x, (int, float)) and not pd.isna(x) else 'N/A')
 
             except Exception as e:
                 all_valid = False
